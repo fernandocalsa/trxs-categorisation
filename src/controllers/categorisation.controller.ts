@@ -58,10 +58,11 @@ export class CategorisationController {
     const { inputPath, outputPath } = this.validate(args);
 
     const allRows: Transaction[] = [];
-    for await (const batch of this.csvReader.read(inputPath)) {
-      // TODO: run HTTP requests using batch, enrich or transform
-      allRows.push(...batch);
+    for await (const transaction of this.csvReader.read(inputPath)) {
+      // TODO: run HTTP requests using each transaction, enrich or transform
+      allRows.push(transaction);
     }
+
 
     await this.csvWriter.write(outputPath, allRows);
   }

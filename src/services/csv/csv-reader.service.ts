@@ -4,11 +4,6 @@ import { injectable } from "tsyringe";
 import type { Transaction } from "../../types";
 import { CsvParser } from "./csv-parser";
 
-export interface ReadOptions {
-  /** Number of transactions per batch. Default 100. */
-  batchSize?: number;
-}
-
 /**
  * Service to read CSV files from disk.
  * Expects the input CSV to have a header row with columns matching the Transaction
@@ -16,48 +11,25 @@ export interface ReadOptions {
  */
 @injectable()
 export class CsvReaderService {
-  private readonly defaultBatchSize = 100;
-
   constructor(private readonly csvParser: CsvParser) {}
 
   /**
-   * Reads a CSV file and yields batches of transactions.
+   * Reads a CSV file line-by-line and yields one transaction at a time.
    * @param inputPath Absolute path to the CSV file
-   * @param options Optional batch size (default 100)
-   * @returns Async iterable of transaction batches
+   * @returns Async iterable of parsed transactions
    */
-  read(
-    inputPath: string,
-    options?: ReadOptions,
-  ): AsyncIterable<Transaction[]> {
-    const batchSize = options?.batchSize ?? this.defaultBatchSize;
-    const csvParser = this.csvParser;
+  async *read(inputPath: string): AsyncGenerator<Transaction> {
+    const parser = createReadStream(inputPath, "utf-8").pipe(
+      parse({
+        columns: true,
+        skip_empty_lines: true,
+        trim: true,
+        relax_column_count: true,
+      }),
+    ) as AsyncIterable<Record<string, string>>;
 
-    return {
-      [Symbol.asyncIterator]: async function* (): AsyncGenerator<Transaction[]> {
-        const parser = createReadStream(inputPath, "utf-8").pipe(
-          parse({
-            columns: true,
-            skip_empty_lines: true,
-            trim: true,
-            relax_column_count: true,
-          }),
-        ) as AsyncIterable<Record<string, string>>;
-
-        let batch: Transaction[] = [];
-
-        for await (const row of parser) {
-          batch.push(csvParser.parseRow(row as Record<string, string>));
-          if (batch.length >= batchSize) {
-            yield batch;
-            batch = [];
-          }
-        }
-
-        if (batch.length > 0) {
-          yield batch;
-        }
-      },
-    };
+    for await (const row of parser) {
+      yield this.csvParser.parseRow(row as Record<string, string>);
+    }
   }
 }
