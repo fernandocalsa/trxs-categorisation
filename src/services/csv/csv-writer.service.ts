@@ -1,5 +1,5 @@
 import { injectable } from "tsyringe";
-import type { CsvContent } from "./csv.types";
+import type { Transaction } from "../../types";
 
 /**
  * Service to write CSV content to a file.
@@ -7,13 +7,13 @@ import type { CsvContent } from "./csv.types";
 @injectable()
 export class CsvWriterService {
   /**
-   * Writes CSV content to the given path.
+   * Writes transactions to a CSV file.
    * @param outputPath Absolute path for the output CSV file
-   * @param content CSV content (headers and rows) to write
+   * @param rows Transactions to write
    */
-  async write(outputPath: string, content: CsvContent): Promise<void> {
-    // TODO: serialize content to CSV and write to outputPath
+  async write(outputPath: string, rows: Transaction[]): Promise<void> {
+    // TODO: serialize rows to CSV and write to outputPath
     void outputPath;
-    void content;
+    void rows;
   }
 }

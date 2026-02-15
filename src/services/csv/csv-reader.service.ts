@@ -1,5 +1,5 @@
 import { injectable } from "tsyringe";
-import type { CsvContent } from "./csv.types";
+import type { Transaction } from "../../types";
 
 /**
  * Service to read CSV files from disk.
@@ -7,13 +7,13 @@ import type { CsvContent } from "./csv.types";
 @injectable()
 export class CsvReaderService {
   /**
-   * Reads a CSV file and returns its content (headers and rows).
+   * Reads a CSV file and returns an array of transactions.
    * @param inputPath Absolute path to the CSV file
-   * @returns Parsed CSV content
+   * @returns Parsed transactions
    */
-  async read(inputPath: string): Promise<CsvContent> {
-    // TODO: read file and parse CSV
+  async read(inputPath: string): Promise<Transaction[]> {
+    // TODO: read file and parse CSV into Transaction[]
     void inputPath;
-    return { headers: [], rows: [] };
+    return [];
   }
 }

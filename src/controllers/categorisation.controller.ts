@@ -56,9 +56,9 @@ export class CategorisationController {
   async run(args: string[]): Promise<void> {
     const { inputPath, outputPath } = this.validate(args);
 
-    const content = await this.csvReader.read(inputPath);
-    // TODO: run HTTP requests using content, build result rows
+    const rows = await this.csvReader.read(inputPath);
+    // TODO: run HTTP requests using rows, build result rows
 
-    await this.csvWriter.write(outputPath, content);
+    await this.csvWriter.write(outputPath, rows);
   }
 }
