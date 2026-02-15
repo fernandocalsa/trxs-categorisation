@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { injectable } from "tsyringe";
+import type { Transaction } from "../types";
 import { CsvReaderService, CsvWriterService } from "../services";
 
 /**
@@ -56,9 +57,12 @@ export class CategorisationController {
   async run(args: string[]): Promise<void> {
     const { inputPath, outputPath } = this.validate(args);
 
-    const rows = await this.csvReader.read(inputPath);
-    // TODO: run HTTP requests using rows, build result rows
+    const allRows: Transaction[] = [];
+    for await (const batch of this.csvReader.read(inputPath)) {
+      // TODO: run HTTP requests using batch, enrich or transform
+      allRows.push(...batch);
+    }
 
-    await this.csvWriter.write(outputPath, rows);
+    await this.csvWriter.write(outputPath, allRows);
   }
 }
