@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { injectable } from "tsyringe";
+import { TripleService } from "../services";
 import type { Transaction } from "../types";
 import { CsvReaderService, CsvWriterService } from "../services";
 
@@ -12,6 +13,7 @@ export class CategorisationController {
   constructor(
     private readonly csvReader: CsvReaderService,
     private readonly csvWriter: CsvWriterService,
+    private readonly tripleService: TripleService,
   ) {}
 
   private validate(args: string[]): { inputPath: string; outputPath: string } {
@@ -59,10 +61,10 @@ export class CategorisationController {
 
     const allRows: Transaction[] = [];
     for await (const transaction of this.csvReader.read(inputPath)) {
-      // TODO: run HTTP requests using each transaction, enrich or transform
+      const enrichResponse = await this.tripleService.enrich(transaction);
+      console.log(enrichResponse);
       allRows.push(transaction);
     }
-
 
     await this.csvWriter.write(outputPath, allRows);
   }

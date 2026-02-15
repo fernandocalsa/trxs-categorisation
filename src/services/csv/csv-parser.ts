@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { injectable } from "tsyringe";
 import type { Transaction } from "../../types";
 import { ChannelType, TransactionType } from "../../types";
@@ -19,7 +20,7 @@ export class CsvParser {
     const transaction: Transaction = {
       merchant_name: get("merchant_name") ?? "",
       transaction_type: this.parseTransactionType(get("transaction_type")),
-      transaction_id: get("transaction_id") ?? "",
+      transaction_id: get("transaction_id") ?? randomUUID(),
     };
 
     const optionalString = (v: string | undefined) =>
