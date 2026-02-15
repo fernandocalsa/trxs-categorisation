@@ -1,4 +1,8 @@
-import { isAxiosError, type AxiosInstance } from "axios";
+import {
+  isAxiosError,
+  type AxiosInstance,
+  type AxiosRequestHeaders,
+} from "axios";
 import { inject, injectable } from "tsyringe";
 import type { Transaction } from "../../types";
 
@@ -60,13 +64,32 @@ export interface TripleEnrichResponse {
   };
 }
 
+export interface TripleEnrichResult {
+  enriched: TripleEnrichResponse | null;
+  raw: {
+    request: TripleRawRequest;
+    response: TripleRawResponse;
+  };
+}
+
+export interface TripleRawRequest {
+  body: unknown;
+  headers: unknown;
+  timestamp: string;
+}
+
+export interface TripleRawResponse {
+  status: number | null;
+  body: unknown;
+  headers: unknown;
+}
+
 export class TripleApiError extends Error {
   constructor(
     message: string,
-    public readonly status: number | null,
-    public readonly responseBody: unknown,
-    public readonly responseHeaders: unknown,
-    public readonly originalError: unknown,
+    public readonly request: TripleRawRequest,
+    public readonly response: TripleRawResponse | undefined,
+    public readonly error: unknown,
   ) {
     super(message);
     this.name = "TripleApiError";
@@ -80,30 +103,73 @@ export class TripleService {
     protected readonly axiosClient: AxiosInstance,
   ) {}
 
-  async enrich(transaction: Transaction): Promise<TripleEnrichResponse> {
+  private stripAuthorization(
+    headers: AxiosRequestHeaders | undefined,
+  ): Record<string, unknown> {
+    if (!headers) return {};
+    const plainHeaders = headers.toJSON() as Record<string, unknown>;
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(plainHeaders)) {
+      if (key.toLowerCase() !== "authorization") {
+        sanitized[key] = value;
+      }
+    }
+
+    return sanitized;
+  }
+
+  async enrich(transaction: Transaction): Promise<TripleEnrichResult> {
+    const timestamp = new Date().toISOString();
     try {
       const response = await this.axiosClient.post<TripleEnrichResponse>(
         "/v1/enrich-transaction/",
         transaction,
       );
 
-      return response.data;
+      return {
+        enriched: response.data,
+        raw: {
+          request: {
+            body: transaction,
+            headers: this.stripAuthorization(response.config.headers),
+            timestamp,
+          },
+          response: {
+            status: response.status,
+            body: response.data,
+            headers: response.headers,
+          },
+        },
+      };
     } catch (error) {
       if (isAxiosError(error)) {
+        const request: TripleRawRequest = {
+          body: transaction,
+          headers: this.stripAuthorization(error.config?.headers),
+          timestamp,
+        };
+        const response: TripleRawResponse = {
+          status: error.response?.status ?? null,
+          body: error.response?.data ?? null,
+          headers: error.response?.headers ?? null,
+        };
+
         throw new TripleApiError(
           "Triple API request failed.",
-          error.response?.status ?? null,
-          error.response?.data ?? null,
-          error.response?.headers ?? null,
+          request,
+          response,
           error,
         );
       }
 
       throw new TripleApiError(
         "Triple API request failed.",
-        null,
-        null,
-        null,
+        {
+          body: transaction,
+          headers: {},
+          timestamp,
+        },
+        undefined,
         error,
       );
     }

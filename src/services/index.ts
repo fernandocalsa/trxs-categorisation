@@ -1,2 +1,6 @@
 export { CsvReaderService, CsvWriterService } from "./csv";
-export { TripleApiError, TripleService } from "./triple";
+export {
+  TripleApiError,
+  TripleService,
+  type TripleEnrichResult,
+} from "./triple";
