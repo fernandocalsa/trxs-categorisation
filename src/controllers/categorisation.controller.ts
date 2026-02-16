@@ -52,6 +52,30 @@ export class CategorisationController {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  private formatDuration(ms: number): string {
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+
+    if (minutes > 0) {
+      return `${minutes} minute${minutes === 1 ? "" : "s"} ${seconds} second${seconds === 1 ? "" : "s"}`;
+    }
+
+    return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  }
+
+  private printProgress(
+    processed: number,
+    total: number,
+    ok: number,
+    failed: number,
+  ): void {
+    const percentage = total === 0 ? 100 : (processed / total) * 100;
+    process.stdout.write(
+      `\rBatch processed: ${processed}/${total} (${percentage.toFixed(2)}%) | ok: ${ok} | failed: ${failed}`,
+    );
+  }
+
   private toFailedEnrichResult(error: unknown): TripleEnrichResult {
     if (!(error instanceof TripleApiError)) {
       throw error;
@@ -74,14 +98,21 @@ export class CategorisationController {
     batch: Transaction[],
     outputStream: ReturnType<CsvWriterService["open"]>,
     tripleService: TripleService,
-  ): Promise<void> {
+  ): Promise<{ ok: number; failed: number }> {
     const settledResults = await Promise.allSettled(
       batch.map((transaction) => tripleService.enrich(transaction)),
     );
+    let ok = 0;
+    let failed = 0;
 
     for (let index = 0; index < batch.length; index += 1) {
       const transaction = batch[index];
       const settledResult = settledResults[index];
+      if (settledResult.status === "fulfilled") {
+        ok += 1;
+      } else {
+        failed += 1;
+      }
       const enrichResult =
         settledResult.status === "fulfilled"
           ? settledResult.value
@@ -89,6 +120,8 @@ export class CategorisationController {
 
       await this.csvWriter.writeLine(outputStream, transaction, enrichResult);
     }
+
+    return { ok, failed };
   }
 
   async run(
@@ -98,8 +131,14 @@ export class CategorisationController {
     environment: TripleEnvironment,
     token: string,
   ): Promise<void> {
+    const startTime = Date.now();
     const { inputPath, outputPath } = this.validate(args);
+    const totalTransactions = await this.csvReader.count(inputPath);
+    console.log(`Total transactions to process: ${totalTransactions}`);
     const tripleService = new TripleService(environment, token);
+    let processedTransactions = 0;
+    let okTransactions = 0;
+    let failedTransactions = 0;
 
     const outputStream = this.csvWriter.open(outputPath);
     try {
@@ -107,7 +146,20 @@ export class CategorisationController {
       for await (const transaction of this.csvReader.read(inputPath)) {
         batch.push(transaction);
         if (batch.length >= batchSize) {
-          await this.processBatch(batch, outputStream, tripleService);
+          const { ok, failed } = await this.processBatch(
+            batch,
+            outputStream,
+            tripleService,
+          );
+          processedTransactions += batch.length;
+          okTransactions += ok;
+          failedTransactions += failed;
+          this.printProgress(
+            processedTransactions,
+            totalTransactions,
+            okTransactions,
+            failedTransactions,
+          );
           batch = [];
           if (batchDelay > 0) {
             await this.sleep(batchDelay * 1000);
@@ -116,10 +168,27 @@ export class CategorisationController {
       }
 
       if (batch.length > 0) {
-        await this.processBatch(batch, outputStream, tripleService);
+        const { ok, failed } = await this.processBatch(
+          batch,
+          outputStream,
+          tripleService,
+        );
+        processedTransactions += batch.length;
+        okTransactions += ok;
+        failedTransactions += failed;
+        this.printProgress(
+          processedTransactions,
+          totalTransactions,
+          okTransactions,
+          failedTransactions,
+        );
       }
     } finally {
       await this.csvWriter.close(outputStream);
     }
+
+    const elapsedMs = Date.now() - startTime;
+    process.stdout.write("\n");
+    console.log(`Processing completed in ${this.formatDuration(elapsedMs)}.`);
   }
 }
