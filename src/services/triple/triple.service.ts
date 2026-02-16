@@ -1,9 +1,9 @@
 import {
+  default as axios,
   isAxiosError,
   type AxiosInstance,
   type AxiosRequestHeaders,
 } from "axios";
-import { inject, injectable } from "tsyringe";
 import type { Transaction } from "../../types";
 
 export interface TripleEnrichCategory {
@@ -72,6 +72,8 @@ export interface TripleEnrichResult {
   };
 }
 
+export type TripleEnvironment = "sandbox" | "production";
+
 export interface TripleRawRequest {
   body: unknown;
   headers: unknown;
@@ -96,12 +98,23 @@ export class TripleApiError extends Error {
   }
 }
 
-@injectable()
 export class TripleService {
-  constructor(
-    @inject("TripleAxiosClient")
-    protected readonly axiosClient: AxiosInstance,
-  ) {}
+  private readonly axiosClient: AxiosInstance;
+
+  constructor(environment: TripleEnvironment, token: string) {
+    const endpoint =
+      environment === "production"
+        ? "https://api.triple.app/api"
+        : "https://api.sandbox.tripledev.app/api";
+
+    this.axiosClient = axios.create({
+      baseURL: endpoint,
+      headers: {
+        Authorization: `Token ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+  }
 
   private stripAuthorization(
     headers: AxiosRequestHeaders | undefined,

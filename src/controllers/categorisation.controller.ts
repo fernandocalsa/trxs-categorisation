@@ -4,8 +4,10 @@ import { injectable } from "tsyringe";
 import {
   TripleApiError,
   TripleService,
+  type TripleEnvironment,
   type TripleEnrichResult,
 } from "../services";
+import type { Transaction } from "../types";
 import { CsvReaderService, CsvWriterService } from "../services";
 
 /**
@@ -16,24 +18,9 @@ export class CategorisationController {
   constructor(
     private readonly csvReader: CsvReaderService,
     private readonly csvWriter: CsvWriterService,
-    private readonly tripleService: TripleService,
   ) {}
 
-  private validate(args: string[]): { inputPath: string; outputPath: string } {
-    if (args.length === 0) {
-      console.error("Error: missing input file path.");
-      console.error("Usage: trxcategorisation <input-file> [output-file]");
-      process.exit(1);
-    }
-
-    if (args.length > 2) {
-      console.error(
-        "Error: expected at most two arguments (input file and optional output file).",
-      );
-      console.error("Usage: trxcategorisation <input-file> [output-file]");
-      process.exit(1);
-    }
-
+  private validate(args: [string] | [string, string]): { inputPath: string; outputPath: string } {
     const inputPath = path.resolve(args[0]);
     const outputPath = (() => {
       if (args.length === 2) {
@@ -46,58 +33,90 @@ export class CategorisationController {
     })();
 
     if (!fs.existsSync(inputPath)) {
-      console.error(`Error: file not found: ${inputPath}`);
-      process.exit(1);
+      throw new Error(`File not found: ${inputPath}`);
     }
 
     const stat = fs.statSync(inputPath);
     if (!stat.isFile()) {
-      console.error(`Error: path is not a file: ${inputPath}`);
-      process.exit(1);
+      throw new Error(`Path is not a file: ${inputPath}`);
     }
 
     if (inputPath === outputPath) {
-      console.error(
-        "Error: input and output file paths must not be the same.",
-      );
-      process.exit(1);
+      throw new Error("Input and output file paths must not be the same.");
     }
 
     return { inputPath, outputPath };
   }
 
-  async run(args: string[]): Promise<void> {
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private toFailedEnrichResult(error: unknown): TripleEnrichResult {
+    if (!(error instanceof TripleApiError)) {
+      throw error;
+    }
+
+    return {
+      enriched: null,
+      raw: {
+        request: error.request,
+        response: error.response ?? {
+          status: null,
+          body: null,
+          headers: null,
+        },
+      },
+    };
+  }
+
+  private async processBatch(
+    batch: Transaction[],
+    outputStream: ReturnType<CsvWriterService["open"]>,
+    tripleService: TripleService,
+  ): Promise<void> {
+    const settledResults = await Promise.allSettled(
+      batch.map((transaction) => tripleService.enrich(transaction)),
+    );
+
+    for (let index = 0; index < batch.length; index += 1) {
+      const transaction = batch[index];
+      const settledResult = settledResults[index];
+      const enrichResult =
+        settledResult.status === "fulfilled"
+          ? settledResult.value
+          : this.toFailedEnrichResult(settledResult.reason);
+
+      await this.csvWriter.writeLine(outputStream, transaction, enrichResult);
+    }
+  }
+
+  async run(
+    args: [string] | [string, string],
+    batchSize: number,
+    batchDelay: number,
+    environment: TripleEnvironment,
+    token: string,
+  ): Promise<void> {
     const { inputPath, outputPath } = this.validate(args);
+    const tripleService = new TripleService(environment, token);
 
     const outputStream = this.csvWriter.open(outputPath);
     try {
+      let batch: Transaction[] = [];
       for await (const transaction of this.csvReader.read(inputPath)) {
-        let enrichResult: TripleEnrichResult;
-        try {
-          enrichResult = await this.tripleService.enrich(transaction);
-        } catch (error) {
-          if (!(error instanceof TripleApiError)) {
-            throw error;
+        batch.push(transaction);
+        if (batch.length >= batchSize) {
+          await this.processBatch(batch, outputStream, tripleService);
+          batch = [];
+          if (batchDelay > 0) {
+            await this.sleep(batchDelay * 1000);
           }
-
-          enrichResult = {
-            enriched: null,
-            raw: {
-              request: error.request,
-              response: error.response ?? {
-                status: null,
-                body: null,
-                headers: null,
-              },
-            },
-          };
         }
+      }
 
-        await this.csvWriter.writeLine(
-          outputStream,
-          transaction,
-          enrichResult,
-        );
+      if (batch.length > 0) {
+        await this.processBatch(batch, outputStream, tripleService);
       }
     } finally {
       await this.csvWriter.close(outputStream);
